@@ -3,7 +3,7 @@
 #include "chess/search.h"
 
 #include <vector>
-
+#include <iostream>
 extern "C" {
 
 const char* get_best_move(const char* fen) {
@@ -23,6 +23,7 @@ const char* get_best_move(const char* fen) {
 
     const Move bestMove = search_best_move(board, kSearchDepth, stateStack);
     move_to_uci(bestMove, bestMoveUci);
+    std::cout << bestMoveUci << std::endl;
     return bestMoveUci;
 }
 

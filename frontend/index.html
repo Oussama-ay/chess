@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simple Chess Board</title>
+  <link rel="stylesheet" href="chessboard-1.0.0.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="panel">
+    <h1>Chess</h1>
+    <div id="board"></div>
+    <p class="hint">You play White. AI plays Black.</p>
+    <div id="status" class="status" aria-live="polite"></div>
+  </main>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="chessboard-1.0.0.min.js"></script>
+  <script src="../build/engine.js"></script>
+  <script type="module" src="script.js"></script>
+</body>
+</html>

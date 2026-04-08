@@ -8,7 +8,7 @@ extern "C" {
 
 const char* get_best_move(const char* fen) {
     static char bestMoveUci[6] = "0000";
-    static constexpr int kSearchDepth = 3;
+    static constexpr int kSearchDepth = 6;
 
     Board board{};
     parse_fen(fen, board);

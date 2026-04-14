@@ -1,5 +1,4 @@
 #include "chess/fen.h"
-#include "chess/movegen.h"
 #include "chess/search.h"
 
 #include <vector>
@@ -15,11 +14,6 @@ const char* get_best_move(const char* fen) {
 
     std::vector<BoardState> stateStack;
     stateStack.reserve(256);
-
-    const std::vector<Move> legalMoves = generate_legal_moves(board, stateStack);
-    if (legalMoves.empty()) {
-        return bestMoveUci;
-    }
 
     const Move bestMove = search_best_move(board, kSearchDepth, stateStack);
     move_to_uci(bestMove, bestMoveUci);

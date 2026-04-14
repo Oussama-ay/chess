@@ -275,14 +275,7 @@ static void add_knight_moves(const Board& board, int row, int col, std::vector<M
     }
 }
 
-static void add_sliding_moves(
-    const Board& board,
-    int row,
-    int col,
-    const int dirs[][2],
-    int dirCount,
-    std::vector<Move>& moves
-) {
+static void add_sliding_moves(const Board& board, int row, int col, const int dirs[][2], int dirCount, std::vector<Move>& moves) {
     const bool white = board.squares[row][col] > 0;
     for (int i = 0; i < dirCount; ++i) {
         int r = row + dirs[i][0];

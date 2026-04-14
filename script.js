@@ -7,6 +7,7 @@ const blackSquareGrey = '#9f8a6f'
 const $status = window.jQuery('#status')
 let engineModule = null
 let aiBusy = false
+let aiTimerId = null
 
 async function initEngine() {
   if (typeof window.ChessEngineModule !== 'function') {
@@ -16,39 +17,61 @@ async function initEngine() {
   engineModule = await window.ChessEngineModule()
 }
 
-function isGameOver() {
-  return typeof game.isGameOver === 'function' ? game.isGameOver() : game.game_over()
+function renderBoard(animate) {
+  if (!board) return
+  board.position(game.fen(), animate)
 }
 
-function isCheckmate() {
-  return typeof game.isCheckmate === 'function' ? game.isCheckmate() : game.in_checkmate()
+function clearAiTimer() {
+  if (aiTimerId === null) return
+
+  window.clearTimeout(aiTimerId)
+  aiTimerId = null
 }
 
-function isDraw() {
-  return typeof game.isDraw === 'function' ? game.isDraw() : game.in_draw()
+function parseUciMove(uciMove) {
+  if (typeof uciMove !== 'string') return null
+
+  const trimmedMove = uciMove.trim().toLowerCase()
+  if (!/^[a-h][1-8][a-h][1-8][nbrq]?$/.test(trimmedMove)) return null
+
+  return {
+    from: trimmedMove.slice(0, 2),
+    to: trimmedMove.slice(2, 4),
+    promotion: trimmedMove[4] ?? 'q'
+  }
 }
 
-function isCheck() {
-  return typeof game.isCheck === 'function' ? game.isCheck() : game.in_check()
+function moveFromEngine() {
+  const fen = game.fen()
+  const rawMove = engineModule.ccall('get_best_move', 'string', ['string'], [fen])
+  const parsedMove = parseUciMove(rawMove)
+
+  if (parsedMove) {
+    const appliedMove = game.move(parsedMove)
+    if (appliedMove) return
+  }
+
+  // If engine output is invalid, keep the game moving with a legal fallback.
+  const fallbackMove = game.moves({ verbose: true })[0]
+  if (fallbackMove) game.move(fallbackMove)
 }
 
 function onDragStart(source, piece) {
-  if (aiBusy) return false
-  if (isGameOver()) return false
+  if (aiBusy || aiTimerId !== null) return false
+  if (game.isGameOver()) return false
 
   if (game.turn() !== 'w') return false
 
-  if ((game.turn() === 'w' && /^b/.test(piece)) ||
-      (game.turn() === 'b' && /^w/.test(piece))) {
-    return false
-  }
+  return /^w/.test(piece)
 }
 
 function onDrop(source, target) {
   removeGreySquares()
 
-  let move = null
+  if (aiBusy || game.turn() !== 'w') return 'snapback'
 
+  let move
   try {
     move = game.move({
       from: source,
@@ -61,8 +84,10 @@ function onDrop(source, target) {
 
   if (move === null) return 'snapback'
 
+  // Force a full board sync immediately so castle rook / promotions stay in lockstep.
+  renderBoard(false)
   updateStatus()
-  queueAiMove()
+  scheduleAiMove()
 }
 
 function removeGreySquares() {
@@ -98,63 +123,44 @@ function onMouseoutSquare() {
   removeGreySquares()
 }
 
-function onSnapEnd() {
-  board.position(game.fen())
-}
+function runAiMove() {
+  aiTimerId = null
 
-function getBestMoveFromEngine(fen) {
-  return engineModule.ccall('get_best_move', 'string', ['string'], [fen])
-}
-
-function toChessJsMove(moveText) {
-  if (!moveText || moveText.length < 4) return null
-
-  return {
-    from: moveText.slice(0, 2),
-    to: moveText.slice(2, 4),
-    promotion: moveText.length >= 5 ? moveText[4] : 'q'
+  if (!engineModule || game.isGameOver() || game.turn() !== 'b') {
+    updateStatus()
+    return
   }
-}
-
-function queueAiMove() {
-  if (isGameOver()) return
-  if (game.turn() !== 'b') return
-  if (!engineModule) return
 
   aiBusy = true
   updateStatus()
 
-  window.setTimeout(() => {
-    const fen = game.fen()
-    const engineMove = getBestMoveFromEngine(fen)
-    const parsedMove = toChessJsMove(engineMove)
+  try {
+    moveFromEngine()
+  } catch (error) {
+    const fallbackMove = game.moves({ verbose: true })[0]
+    if (fallbackMove) game.move(fallbackMove)
+  }
 
-    if (parsedMove) {
-      try {
-        game.move(parsedMove)
-      } catch (error) {
-        const fallback = game.moves({ verbose: true })[0]
-        if (fallback) game.move(fallback)
-      }
-    }
+  renderBoard(true)
+  aiBusy = false
+  updateStatus()
+}
 
-    board.position(game.fen())
-    aiBusy = false
-    updateStatus()
-  }, 120)
+function scheduleAiMove() {
+  if (aiBusy || aiTimerId !== null) return
+  if (!engineModule) return
+  if (game.isGameOver() || game.turn() !== 'b') return
+
+  aiTimerId = window.setTimeout(runAiMove, 180)
 }
 
 function updateStatus() {
   let status = ''
-  let moveColor = 'White'
+  const moveColor = game.turn() === 'b' ? 'Black' : 'White'
 
-  if (game.turn() === 'b') {
-    moveColor = 'Black'
-  }
-
-  if (isCheckmate()) {
+  if (game.isCheckmate()) {
     status = 'Game over, ' + moveColor + ' is in checkmate.'
-  } else if (isDraw()) {
+  } else if (game.isDraw()) {
     status = 'Game over, drawn position.'
   } else {
     status = moveColor + ' to move'
@@ -163,7 +169,7 @@ function updateStatus() {
       status += ' (AI thinking...)'
     }
 
-    if (isCheck()) {
+    if (game.isCheck()) {
       status += ', ' + moveColor + ' is in check'
     }
   }
@@ -181,14 +187,15 @@ async function start() {
     onDragStart,
     onDrop,
     onMouseoutSquare,
-    onMouseoverSquare,
-    onSnapEnd
+    onMouseoverSquare
   })
 
+  renderBoard(false)
   updateStatus()
   window.addEventListener('resize', () => board.resize())
 }
 
 start().catch((error) => {
+  clearAiTimer()
   $status.text('Engine failed to load: ' + error.message)
 })

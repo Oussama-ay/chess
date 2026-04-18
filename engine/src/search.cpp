@@ -3,6 +3,8 @@
 #include "chess/eval.h"
 #include "chess/movegen.h"
 
+static constexpr int kMateScore = kInfinity - 1000;
+
 static int piece_value_for_ordering(int pieceType)
 {
     switch (pieceType)
@@ -51,7 +53,7 @@ static void order_moves(const Board& board, std::vector<Move>& moves)
     });
 }
 
-static int negamax(Board& board, int depth, int alpha, int beta, std::vector<BoardState>& stateStack)
+static int negamax(Board& board, int depth, int alpha, int beta, std::vector<BoardState>& stateStack, int ply)
 {
     if (board.halfMoveClock >= 100)
         return 0;
@@ -66,7 +68,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, std::vector<Boa
     if (legalMoves.empty())
     {
         if (is_in_check(board, board.whiteToMove))
-            return -kInfinity;
+            return -kMateScore + ply;
         return 0;
     }
 
@@ -76,7 +78,7 @@ static int negamax(Board& board, int depth, int alpha, int beta, std::vector<Boa
     for (const Move& move : legalMoves)
     {
         make_move(board, move, stateStack);
-        const int score = -negamax(board, depth - 1, -beta, -alpha, stateStack);
+        const int score = -negamax(board, depth - 1, -beta, -alpha, stateStack, ply + 1);
         undo_move(board, move, stateStack);
 
         if (score > best) best = score;
@@ -140,7 +142,7 @@ Move search_best_move(Board& board, int depth, std::vector<BoardState>& stateSta
 
     for (const Move& move : legalMoves) {
         make_move(board, move, stateStack);
-        const int score = -negamax(board, depth - 1, -kInfinity, kInfinity, stateStack);
+        const int score = -negamax(board, depth - 1, -kInfinity, kInfinity, stateStack, 1);
         undo_move(board, move, stateStack);
 
         if (score > bestScore) {

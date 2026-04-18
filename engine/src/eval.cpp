@@ -6,7 +6,7 @@ static const int kPieceValue[7] = {
     0,
     100,    // pawn
     320,    // knight
-    330,    // bishop
+    350,    // bishop
     500,    // rook
     20000,  // king
     900     // queen

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Choose Color</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .choice { display:flex; gap:1rem; margin-top:2rem; }
+    .choice button { padding:1rem 1.5rem; font-size:1.1rem; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1>Choose Your Color</h1>
+    <p>Pick which side you want to play. You can change this later.</p>
+
+    <div class="choice">
+      <button id="choose-white">Play as White</button>
+      <button id="choose-black">Play as Black</button>
+    </div>
+
+    <p style="margin-top:1.5rem"><a href="index.html">Continue without choosing</a></p>
+  </main>
+
+  <script>
+    const setAndGo = (color) => {
+      try { localStorage.setItem('playerColor', color); } catch(e) {}
+      window.location.href = 'index.html';
+    }
+
+    document.getElementById('choose-white').addEventListener('click', () => setAndGo('white'))
+    document.getElementById('choose-black').addEventListener('click', () => setAndGo('black'))
+  </script>
+</body>
+</html>

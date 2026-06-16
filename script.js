@@ -9,6 +9,12 @@ let engineModule = null
 let aiBusy = false
 let aiTimerId = null
 
+// Player color: 'white' or 'black' (persisted in localStorage)
+let playerColor = 'white'
+try { playerColor = localStorage.getItem('playerColor') || 'white' } catch (e) {}
+const playerTurn = playerColor === 'white' ? 'w' : 'b'
+const engineTurn = playerTurn === 'w' ? 'b' : 'w'
+
 async function initEngine() {
   if (typeof window.ChessEngineModule !== 'function') {
     throw new Error('Chess engine loader is not available')
@@ -61,15 +67,16 @@ function onDragStart(source, piece) {
   if (aiBusy || aiTimerId !== null) return false
   if (game.isGameOver()) return false
 
-  if (game.turn() !== 'w') return false
+  if (game.turn() !== playerTurn) return false
 
-  return /^w/.test(piece)
+  if (playerTurn === 'w') return /^w/.test(piece)
+  return /^b/.test(piece)
 }
 
 function onDrop(source, target) {
   removeGreySquares()
 
-  if (aiBusy || game.turn() !== 'w') return 'snapback'
+  if (aiBusy || game.turn() !== playerTurn) return 'snapback'
 
   let move
   try {
@@ -126,7 +133,7 @@ function onMouseoutSquare() {
 function runAiMove() {
   aiTimerId = null
 
-  if (!engineModule || game.isGameOver() || game.turn() !== 'b') {
+  if (!engineModule || game.isGameOver() || game.turn() !== engineTurn) {
     updateStatus()
     return
   }
@@ -149,7 +156,7 @@ function runAiMove() {
 function scheduleAiMove() {
   if (aiBusy || aiTimerId !== null) return
   if (!engineModule) return
-  if (game.isGameOver() || game.turn() !== 'b') return
+  if (game.isGameOver() || game.turn() !== engineTurn) return
 
   aiTimerId = window.setTimeout(runAiMove, 180)
 }
@@ -165,7 +172,7 @@ function updateStatus() {
   } else {
     status = moveColor + ' to move'
 
-    if (aiBusy && moveColor === 'Black') {
+    if (aiBusy && moveColor === (engineTurn === 'b' ? 'Black' : 'White')) {
       status += ' (AI thinking...)'
     }
 
@@ -183,12 +190,16 @@ async function start() {
   board = window.Chessboard('board', {
     draggable: true,
     position: 'start',
+    orientation: playerColor === 'white' ? 'white' : 'black',
     pieceTheme: 'chesspieces/wikipedia/{piece}.png',
     onDragStart,
     onDrop,
     onMouseoutSquare,
     onMouseoverSquare
   })
+
+  // If the engine moves first (player chose black), schedule AI immediately.
+  if (game.turn() === engineTurn) scheduleAiMove()
 
   renderBoard(false)
   updateStatus()

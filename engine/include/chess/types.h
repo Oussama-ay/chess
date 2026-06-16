@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 struct Board {
     int squares[8][8];      // +N = white, -N = black, 0 = empty
     bool whiteToMove;
@@ -7,6 +9,7 @@ struct Board {
     int enPassantCol;       // -1 if none
     int halfMoveClock;
     int fullMoveNumber;
+    std::uint64_t hash;
 };
 
 struct Move {
@@ -27,6 +30,7 @@ struct BoardState {
     int fullMoveNumber;
     int movedPiece;
     bool whiteToMove;
+    std::uint64_t hash;
 };
 
 inline bool in_bounds(int row, int col) {

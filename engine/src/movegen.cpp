@@ -1,5 +1,112 @@
 #include "chess/movegen.h"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+namespace {
+
+static std::uint64_t splitmix64(std::uint64_t x) {
+    x += 0x9e3779b97f4a7c15ULL;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
+}
+
+static const std::array<std::uint64_t, 64 * 12>& piece_square_keys() {
+    static const std::array<std::uint64_t, 64 * 12> keys = [] {
+        std::array<std::uint64_t, 64 * 12> out{};
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            out[i] = splitmix64(0xA17C9E3779B97F4AULL + static_cast<std::uint64_t>(i));
+        }
+        return out;
+    }();
+    return keys;
+}
+
+static std::uint64_t side_to_move_key() {
+    static const std::uint64_t key = splitmix64(0xD1B54A32D192ED03ULL);
+    return key;
+}
+
+static std::uint64_t castling_key(int index) {
+    static const std::array<std::uint64_t, 4> keys = [] {
+        std::array<std::uint64_t, 4> out{};
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            out[i] = splitmix64(0xE7037ED1A0B428DBULL + static_cast<std::uint64_t>(i));
+        }
+        return out;
+    }();
+    return keys[static_cast<std::size_t>(index)];
+}
+
+static std::uint64_t en_passant_key(int file) {
+    static const std::array<std::uint64_t, 8> keys = [] {
+        std::array<std::uint64_t, 8> out{};
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            out[i] = splitmix64(0x8CB92BA72F3D8DD7ULL + static_cast<std::uint64_t>(i));
+        }
+        return out;
+    }();
+    return keys[static_cast<std::size_t>(file)];
+}
+
+static std::uint64_t halfmove_key(int halfMoveClock) {
+    return splitmix64(0xC6BC279692B5CC83ULL ^ static_cast<std::uint64_t>(halfMoveClock));
+}
+
+static int piece_index(int piece) {
+    const int type = abs_piece(piece) - 1;
+    const int colorOffset = piece > 0 ? 0 : 6;
+    return colorOffset + type;
+}
+
+static std::uint64_t piece_square_key(int piece, int row, int col) {
+    const int index = piece_index(piece) * 64 + (row * 8 + col);
+    return piece_square_keys()[static_cast<std::size_t>(index)];
+}
+
+static void xor_castling_rights(std::uint64_t& hash, const bool castlingRights[4]) {
+    for (int i = 0; i < 4; ++i) {
+        if (castlingRights[i]) {
+            hash ^= castling_key(i);
+        }
+    }
+}
+
+static std::uint64_t compute_state_hash(const Board& board) {
+    std::uint64_t hash = 0;
+
+    for (int row = 0; row < 8; ++row) {
+        for (int col = 0; col < 8; ++col) {
+            const int piece = board.squares[row][col];
+            if (piece != 0) {
+                hash ^= piece_square_key(piece, row, col);
+            }
+        }
+    }
+
+    xor_castling_rights(hash, board.castlingRights);
+
+    if (board.enPassantCol != -1) {
+        hash ^= en_passant_key(board.enPassantCol);
+    }
+
+    if (board.whiteToMove) {
+        hash ^= side_to_move_key();
+    }
+
+    hash ^= halfmove_key(board.halfMoveClock);
+    return hash;
+}
+
+} // namespace
+
+std::uint64_t compute_zobrist_hash(const Board& board) {
+    return compute_state_hash(board);
+}
+
 void    make_move(Board& board, const Move& move, std::vector<BoardState>& stateStack) {
     BoardState state{};
     state.captured = board.squares[move.toRow][move.toCol];
@@ -11,6 +118,7 @@ void    make_move(Board& board, const Move& move, std::vector<BoardState>& state
     state.enPassantCol = board.enPassantCol;
     state.halfMoveClock = board.halfMoveClock;
     state.fullMoveNumber = board.fullMoveNumber;
+    state.hash = board.hash;
     stateStack.push_back(state);
 
     BoardState& last = stateStack.back();
@@ -18,11 +126,23 @@ void    make_move(Board& board, const Move& move, std::vector<BoardState>& state
     const bool whiteMoving = movingPiece > 0;
     const int pieceType = abs_piece(movingPiece);
 
+    if (board.whiteToMove) {
+        board.hash ^= side_to_move_key();
+    }
+    board.hash ^= halfmove_key(board.halfMoveClock);
+    if (board.enPassantCol != -1) {
+        board.hash ^= en_passant_key(board.enPassantCol);
+    }
+    xor_castling_rights(board.hash, board.castlingRights);
+
+    board.hash ^= piece_square_key(movingPiece, move.fromRow, move.fromCol);
+
     board.squares[move.fromRow][move.fromCol] = 0;
 
     if (move.isEnPassant) {
         const int capturedRow = move.fromRow;
         last.captured = board.squares[capturedRow][move.toCol];
+        board.hash ^= piece_square_key(last.captured, capturedRow, move.toCol);
         board.squares[capturedRow][move.toCol] = 0;
     }
 
@@ -30,15 +150,20 @@ void    make_move(Board& board, const Move& move, std::vector<BoardState>& state
     if (move.promotion != 0) {
         placedPiece = whiteMoving ? move.promotion : -move.promotion;
     }
+    board.hash ^= piece_square_key(placedPiece, move.toRow, move.toCol);
     board.squares[move.toRow][move.toCol] = placedPiece;
 
     if (move.isCastling) {
         if (move.toCol == 6) {
+            board.hash ^= piece_square_key(board.squares[move.toRow][7], move.toRow, 7);
             board.squares[move.toRow][5] = board.squares[move.toRow][7];
             board.squares[move.toRow][7] = 0;
+            board.hash ^= piece_square_key(board.squares[move.toRow][5], move.toRow, 5);
         } else {
+            board.hash ^= piece_square_key(board.squares[move.toRow][0], move.toRow, 0);
             board.squares[move.toRow][3] = board.squares[move.toRow][0];
             board.squares[move.toRow][0] = 0;
+            board.hash ^= piece_square_key(board.squares[move.toRow][3], move.toRow, 3);
         }
     }
 
@@ -82,6 +207,15 @@ void    make_move(Board& board, const Move& move, std::vector<BoardState>& state
     }
 
     board.whiteToMove = !board.whiteToMove;
+
+    xor_castling_rights(board.hash, board.castlingRights);
+    if (board.enPassantCol != -1) {
+        board.hash ^= en_passant_key(board.enPassantCol);
+    }
+    board.hash ^= halfmove_key(board.halfMoveClock);
+    if (board.whiteToMove) {
+        board.hash ^= side_to_move_key();
+    }
 }
 
 void undo_move(Board& board, const Move& move, std::vector<BoardState>& stateStack) {
@@ -115,6 +249,7 @@ void undo_move(Board& board, const Move& move, std::vector<BoardState>& stateSta
     board.halfMoveClock = state.halfMoveClock;
     board.fullMoveNumber = state.fullMoveNumber;
     board.whiteToMove = state.whiteToMove;
+    board.hash = state.hash;
 }
 
 bool is_attacked_by(const Board& board, int targetRow, int targetCol, bool byWhite) {
@@ -335,8 +470,7 @@ static void add_king_moves(const Board& board, int row, int col, std::vector<Mov
     }
 }
 
-static std::vector<Move> generate_pseudo_legal_moves(const Board& board) {
-    std::vector<Move> moves;
+static void generate_pseudo_legal_moves(const Board& board, std::vector<Move>& moves) {
     const bool whiteToMove = board.whiteToMove;
 
     static const int kBishopDirs[4][2] = {{-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
@@ -362,12 +496,13 @@ static std::vector<Move> generate_pseudo_legal_moves(const Board& board) {
         }
     }
 
-    return moves;
 }
 
-std::vector<Move> generate_legal_moves(Board& board, std::vector<BoardState>& stateStack) {
-    std::vector<Move> legalMoves;
-    const std::vector<Move> pseudoMoves = generate_pseudo_legal_moves(board);
+void generate_legal_moves(Board& board, std::vector<BoardState>& stateStack, std::vector<Move>& legalMoves) {
+    legalMoves.clear();
+    std::vector<Move> pseudoMoves;
+    pseudoMoves.reserve(64);
+    generate_pseudo_legal_moves(board, pseudoMoves);
     const bool sideToMove = board.whiteToMove;
 
     for (const Move& move : pseudoMoves) {
@@ -388,6 +523,11 @@ std::vector<Move> generate_legal_moves(Board& board, std::vector<BoardState>& st
             legalMoves.push_back(move);
         }
     }
+}
 
+std::vector<Move> generate_legal_moves(Board& board, std::vector<BoardState>& stateStack) {
+    std::vector<Move> legalMoves;
+    legalMoves.reserve(64);
+    generate_legal_moves(board, stateStack, legalMoves);
     return legalMoves;
 }

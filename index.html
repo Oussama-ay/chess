@@ -11,9 +11,27 @@
   <main class="panel">
     <h1>Chess</h1>
     <p style="margin-bottom:0.5rem"><a href="choose.html">Change color / New game</a></p>
-    <div id="board"></div>
-    <p class="hint">You play White. AI plays Black.</p>
-    <div id="status" class="status" aria-live="polite"></div>
+    <div class="layout">
+      <section>
+        <div id="board-wrap" class="board-wrap">
+          <div id="board"></div>
+          <canvas id="arrow-layer" aria-hidden="true"></canvas>
+        </div>
+        <p class="hint">Right-click and drag to draw arrows. Right-click the same arrow again to remove it.</p>
+        <div id="status" class="status" aria-live="polite"></div>
+      </section>
+
+      <aside class="moves-panel" aria-label="Move history panel">
+        <h2>Moves</h2>
+        <div id="move-list" class="move-list" role="list"></div>
+        <div class="move-controls">
+          <button id="btn-start" type="button" aria-label="First move">|&lt;</button>
+          <button id="btn-prev" type="button" aria-label="Previous move">&lt;</button>
+          <button id="btn-next" type="button" aria-label="Next move">&gt;</button>
+          <button id="btn-end" type="button" aria-label="Last move">&gt;|</button>
+        </div>
+      </aside>
+    </div>
   </main>
 
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>

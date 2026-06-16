@@ -1,4 +1,5 @@
 #include "chess/fen.h"
+#include "chess/movegen.h"
 
 #include <array>
 #include <cctype>
@@ -68,4 +69,5 @@ void parse_fen(const char* fen, Board& outBoard) {
 
     outBoard.halfMoveClock = std::stoi(tokens[4]);
     outBoard.fullMoveNumber = std::stoi(tokens[5]);
+    outBoard.hash = compute_zobrist_hash(outBoard);
 }

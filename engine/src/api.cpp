@@ -1,13 +1,13 @@
 #include "chess/fen.h"
 #include "chess/search.h"
 
-#include <vector>
 #include <iostream>
+#include <vector>
+
 extern "C" {
 
 const char* get_best_move(const char* fen) {
-    static char bestMoveUci[6] = "0000";
-    static constexpr int kSearchDepth = 7;
+    static char uci[6] = "0000";
 
     Board board{};
     parse_fen(fen, board);
@@ -15,10 +15,9 @@ const char* get_best_move(const char* fen) {
     std::vector<BoardState> stateStack;
     stateStack.reserve(256);
 
-    const Move bestMove = search_best_move(board, kSearchDepth, stateStack);
-    move_to_uci(bestMove, bestMoveUci);
-    std::cout << bestMoveUci << std::endl;
-    return bestMoveUci;
+    move_to_uci(search_best_move(board, 7, stateStack), uci);
+    std::cout << uci << std::endl;
+    return uci;
 }
 
-} // extern "C"
+}

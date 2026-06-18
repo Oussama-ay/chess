@@ -7,10 +7,14 @@ EMFLAGS ?= -s WASM=1 -s MODULARIZE=1 -s EXPORT_NAME=ChessEngineModule -s ALLOW_M
 
 SRC := \
 	src/api.cpp \
+	src/attack.cpp \
+	src/board.cpp \
 	src/eval.cpp \
 	src/fen.cpp \
 	src/movegen.cpp \
-	src/search.cpp
+	src/search.cpp \
+	src/tt.cpp \
+	src/zobrist.cpp
 
 BUILD_DIR := ../build
 TARGET_JS := $(BUILD_DIR)/engine.js

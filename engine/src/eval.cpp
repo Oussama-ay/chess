@@ -104,7 +104,7 @@ int evaluate(const Board& board)
     for (int row = 0; row < 8; ++row)
     {
         for (int col = 0; col < 8; ++col) {
-            const int piece = board.squares[row][col];
+            int piece = board.squares[row][col];
             if (piece == 0) continue;
 
             const int type = abs_piece(piece);
@@ -115,6 +115,5 @@ int evaluate(const Board& board)
             score += kPieceSquareTable[type][idx] * sign;
         }
     }
-
     return score;
 }

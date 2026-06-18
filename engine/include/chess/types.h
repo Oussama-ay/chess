@@ -2,8 +2,15 @@
 
 #include <cstdint>
 
+constexpr int PAWN   = 1;
+constexpr int KNIGHT = 2;
+constexpr int BISHOP = 3;
+constexpr int ROOK   = 4;
+constexpr int KING   = 5;
+constexpr int QUEEN  = 6;
+
 struct Board {
-    int squares[8][8];      // +N = white, -N = black, 0 = empty
+    int squares[8][8];
     bool whiteToMove;
     bool castlingRights[4]; // [WK, WQ, BK, BQ]
     int enPassantCol;       // -1 if none
@@ -17,9 +24,17 @@ struct Move {
     int fromCol;
     int toRow;
     int toCol;
-    int promotion;  // 0 = none, or piece type (2-6)
+    int promotion;  // 0 = none, or piece type
     bool isCastling;
     bool isEnPassant;
+
+    bool operator==(const Move& o) const {
+        return fromRow == o.fromRow && fromCol == o.fromCol &&
+               toRow == o.toRow && toCol == o.toCol &&
+               promotion == o.promotion &&
+               isCastling == o.isCastling &&
+               isEnPassant == o.isEnPassant;
+    }
 };
 
 struct BoardState {

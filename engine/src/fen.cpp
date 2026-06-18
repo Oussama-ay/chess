@@ -1,73 +1,48 @@
 #include "chess/fen.h"
-#include "chess/movegen.h"
+#include "chess/zobrist.h"
 
-#include <array>
 #include <cctype>
 #include <cstring>
 #include <sstream>
 #include <string>
 
-static int piece_from_fen_char(char c) {
-    const bool isWhite = std::isupper(static_cast<unsigned char>(c)) != 0;
-    const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+static int piece_from_char(char c) {
+    bool white = std::isupper(static_cast<unsigned char>(c)) != 0;
     int piece = 0;
-
-    switch (lower) {
-        case 'p': piece = 1; break;
-        case 'n': piece = 2; break;
-        case 'b': piece = 3; break;
-        case 'r': piece = 4; break;
-        case 'k': piece = 5; break;
-        case 'q': piece = 6; break;
+    switch (std::tolower(static_cast<unsigned char>(c))) {
+        case 'p': piece = PAWN;   break;
+        case 'n': piece = KNIGHT; break;
+        case 'b': piece = BISHOP; break;
+        case 'r': piece = ROOK;   break;
+        case 'k': piece = KING;   break;
+        case 'q': piece = QUEEN;  break;
         default: return 0;
     }
-
-    return isWhite ? piece : -piece;
+    return white ? piece : -piece;
 }
 
-void parse_fen(const char* fen, Board& outBoard) {
-    std::memset(&outBoard, 0, sizeof(outBoard));
-    outBoard.enPassantCol = -1;
+void parse_fen(const char* fen, Board& out) {
+    std::memset(&out, 0, sizeof(out));
+    out.enPassantCol = -1;
 
     std::istringstream ss(fen);
-    std::array<std::string, 6> tokens;
-    for (int i = 0; i < 6; ++i) {
-        ss >> tokens[i];
+    std::string tok[6];
+    for (int i = 0; i < 6; ++i) ss >> tok[i];
+
+    int row = 7, col = 0;
+    for (char c : tok[0]) {
+        if (c == '/') { --row; col = 0; }
+        else if (std::isdigit(static_cast<unsigned char>(c))) col += c - '0';
+        else { out.squares[row][col] = piece_from_char(c); ++col; }
     }
 
-    int row = 7;
-    int col = 0;
-    for (char c : tokens[0]) {
-        if (c == '/') {
-            --row;
-            col = 0;
-            continue;
-        }
-
-        if (std::isdigit(static_cast<unsigned char>(c))) {
-            const int skip = c - '0';
-            col += skip;
-            continue;
-        }
-
-        outBoard.squares[row][col] = piece_from_fen_char(c);
-        ++col;
-    }
-
-    outBoard.whiteToMove = (tokens[1] == "w");
-
-    outBoard.castlingRights[0] = tokens[2].find('K') != std::string::npos;
-    outBoard.castlingRights[1] = tokens[2].find('Q') != std::string::npos;
-    outBoard.castlingRights[2] = tokens[2].find('k') != std::string::npos;
-    outBoard.castlingRights[3] = tokens[2].find('q') != std::string::npos;
-
-    if (tokens[3] == "-") {
-        outBoard.enPassantCol = -1;
-    } else {
-        outBoard.enPassantCol = tokens[3][0] - 'a';
-    }
-
-    outBoard.halfMoveClock = std::stoi(tokens[4]);
-    outBoard.fullMoveNumber = std::stoi(tokens[5]);
-    outBoard.hash = compute_zobrist_hash(outBoard);
+    out.whiteToMove = (tok[1] == "w");
+    out.castlingRights[0] = tok[2].find('K') != std::string::npos;
+    out.castlingRights[1] = tok[2].find('Q') != std::string::npos;
+    out.castlingRights[2] = tok[2].find('k') != std::string::npos;
+    out.castlingRights[3] = tok[2].find('q') != std::string::npos;
+    out.enPassantCol = (tok[3] == "-") ? -1 : tok[3][0] - 'a';
+    out.halfMoveClock = std::stoi(tok[4]);
+    out.fullMoveNumber = std::stoi(tok[5]);
+    out.hash = compute_zobrist_hash(out);
 }

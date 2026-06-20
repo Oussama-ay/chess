@@ -13,7 +13,9 @@ const btnStartEl = document.getElementById('btn-start')
 const btnPrevEl = document.getElementById('btn-prev')
 const btnNextEl = document.getElementById('btn-next')
 const btnEndEl = document.getElementById('btn-end')
-let engineModule = null
+let engineWorker = null
+let engineReady = false
+let pendingMoveResolve = null
 let aiBusy = false
 let aiTimerId = null
 let moveTimeline = []
@@ -311,12 +313,40 @@ function setupMoveControls() {
   })
 }
 
-async function initEngine() {
-  if (typeof window.ChessEngineModule !== 'function') {
-    throw new Error('Chess engine loader is not available')
-  }
+function initEngine() {
+  return new Promise((resolve, reject) => {
+    try {
+      engineWorker = new Worker('./engine-worker.js')
+    } catch (e) {
+      reject(new Error('Failed to create Web Worker: ' + e.message))
+      return
+    }
 
-  engineModule = await window.ChessEngineModule()
+    engineWorker.onmessage = (e) => {
+      const data = e.data
+      if (data.type === 'ready') {
+        engineReady = true
+        resolve()
+      } else if (data.type === 'move') {
+        if (pendingMoveResolve) {
+          const res = pendingMoveResolve
+          pendingMoveResolve = null
+          res(data.move)
+        }
+      } else if (data.type === 'error') {
+        console.error('Engine worker error:', data.error)
+        if (pendingMoveResolve) {
+          const res = pendingMoveResolve
+          pendingMoveResolve = null
+          res(null)
+        }
+      }
+    }
+
+    engineWorker.onerror = (err) => {
+      reject(new Error('Web Worker error: ' + err.message))
+    }
+  })
 }
 
 function renderBoard(animate) {
@@ -345,19 +375,11 @@ function parseUciMove(uciMove) {
   }
 }
 
-function moveFromEngine() {
-  const fen = game.fen()
-  const rawMove = engineModule.ccall('get_best_move', 'string', ['string'], [fen])
-  const parsedMove = parseUciMove(rawMove)
-
-  if (parsedMove) {
-    const appliedMove = game.move(parsedMove)
-    if (appliedMove) return
-  }
-
-  // If engine output is invalid, keep the game moving with a legal fallback.
-  const fallbackMove = game.moves({ verbose: true })[0]
-  if (fallbackMove) game.move(fallbackMove)
+function moveFromEngineAsync() {
+  return new Promise((resolve) => {
+    pendingMoveResolve = resolve
+    engineWorker.postMessage({ fen: game.fen() })
+  })
 }
 
 function onDragStart(source, piece) {
@@ -433,7 +455,7 @@ function onMouseoutSquare() {
   removeGreySquares()
 }
 
-function runAiMove() {
+async function runAiMove() {
   aiTimerId = null
 
   if (isReviewMode()) {
@@ -441,17 +463,38 @@ function runAiMove() {
     return
   }
 
-  if (!engineModule || game.isGameOver() || game.turn() !== engineTurn) {
+  if (!engineReady || game.isGameOver() || game.turn() !== engineTurn) {
     updateStatus()
     return
   }
 
+  const expectedFen = game.fen()
   aiBusy = true
   updateStatus()
 
   try {
-    moveFromEngine()
+    const rawMove = await moveFromEngineAsync()
+    
+    // Discard result if game state changed while searching
+    if (isReviewMode() || game.fen() !== expectedFen || game.turn() !== engineTurn) {
+      aiBusy = false
+      updateStatus()
+      return
+    }
+
+    const parsedMove = parseUciMove(rawMove)
+    if (parsedMove && game.move(parsedMove)) {
+      // ok
+    } else {
+      const fallbackMove = game.moves({ verbose: true })[0]
+      if (fallbackMove) game.move(fallbackMove)
+    }
   } catch (error) {
+    if (isReviewMode() || game.fen() !== expectedFen || game.turn() !== engineTurn) {
+      aiBusy = false
+      updateStatus()
+      return
+    }
     const fallbackMove = game.moves({ verbose: true })[0]
     if (fallbackMove) game.move(fallbackMove)
   }
@@ -467,7 +510,7 @@ function runAiMove() {
 
 function scheduleAiMove() {
   if (aiBusy || aiTimerId !== null) return
-  if (!engineModule) return
+  if (!engineReady) return
   if (isReviewMode()) return
   if (game.isGameOver() || game.turn() !== engineTurn) return
 

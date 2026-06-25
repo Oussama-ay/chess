@@ -95,10 +95,18 @@ static void add_king_moves(const Board& board, int row, int col, std::vector<Mov
 
     int baseRow = white ? 0 : 7;
     int ks = white ? 0 : 2;
+    int rook = white ? ROOK : -ROOK;
     if (row == baseRow && col == 4) {
-        if (board.castlingRights[ks] && board.squares[baseRow][5] == 0 && board.squares[baseRow][6] == 0)
+        if (board.castlingRights[ks] &&
+            board.squares[baseRow][7] == rook &&
+            board.squares[baseRow][5] == 0 &&
+            board.squares[baseRow][6] == 0)
             moves.push_back({baseRow, 4, baseRow, 6, 0, true, false});
-        if (board.castlingRights[ks+1] && board.squares[baseRow][1] == 0 && board.squares[baseRow][2] == 0 && board.squares[baseRow][3] == 0)
+        if (board.castlingRights[ks+1] &&
+            board.squares[baseRow][0] == rook &&
+            board.squares[baseRow][1] == 0 &&
+            board.squares[baseRow][2] == 0 &&
+            board.squares[baseRow][3] == 0)
             moves.push_back({baseRow, 4, baseRow, 2, 0, true, false});
     }
 }

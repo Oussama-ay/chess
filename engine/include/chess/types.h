@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstdint>
-
 constexpr int PAWN   = 1;
 constexpr int KNIGHT = 2;
 constexpr int BISHOP = 3;
@@ -15,8 +13,6 @@ struct Board {
     bool castlingRights[4]; // [WK, WQ, BK, BQ]
     int enPassantCol;       // -1 if none
     int halfMoveClock;
-    int fullMoveNumber;
-    std::uint64_t hash;
 };
 
 struct Move {
@@ -27,14 +23,6 @@ struct Move {
     int promotion;  // 0 = none, or piece type
     bool isCastling;
     bool isEnPassant;
-
-    bool operator==(const Move& o) const {
-        return fromRow == o.fromRow && fromCol == o.fromCol &&
-               toRow == o.toRow && toCol == o.toCol &&
-               promotion == o.promotion &&
-               isCastling == o.isCastling &&
-               isEnPassant == o.isEnPassant;
-    }
 };
 
 struct BoardState {
@@ -42,10 +30,8 @@ struct BoardState {
     bool castlingRights[4];
     int enPassantCol;
     int halfMoveClock;
-    int fullMoveNumber;
     int movedPiece;
     bool whiteToMove;
-    std::uint64_t hash;
 };
 
 inline bool in_bounds(int row, int col) {

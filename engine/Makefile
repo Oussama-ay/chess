@@ -12,9 +12,7 @@ SRC := \
 	src/eval.cpp \
 	src/fen.cpp \
 	src/movegen.cpp \
-	src/search.cpp \
-	src/tt.cpp \
-	src/zobrist.cpp
+	src/search.cpp
 
 BUILD_DIR := ../build
 TARGET_JS := $(BUILD_DIR)/engine.js

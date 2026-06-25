@@ -3,270 +3,245 @@
 #include "chess/board.h"
 #include "chess/eval.h"
 #include "chess/movegen.h"
-#include "chess/tt.h"
 
 #include <algorithm>
+#include <chrono>
 #include <vector>
 
 namespace {
 
+static constexpr int kInfinity = 100000000;
+static constexpr int kMateScore = kInfinity - 1000;
+static constexpr int kTimeCheckInterval = 2048;
+static constexpr int kMaxQuiescencePly = 12;
+
+struct SearchContext {
+	bool stopped = false;
+	int nodesSinceCheck = 0;
+	std::chrono::steady_clock::time_point deadline;
+
+	explicit SearchContext(int timeMs)
+		: deadline(std::chrono::steady_clock::now() +
+				   std::chrono::milliseconds(std::max(1, timeMs))) {}
+};
+
 static int piece_value(int pieceType) {
-  switch (pieceType) {
-  case PAWN:
-    return 100;
-  case KNIGHT:
-    return 320;
-  case BISHOP:
-    return 330;
-  case ROOK:
-    return 500;
-  case KING:
-    return 20000;
-  case QUEEN:
-    return 900;
-  default:
-    return 0;
-  }
+	switch (pieceType) {
+		case PAWN:   return 100;
+		case KNIGHT: return 320;
+		case BISHOP: return 330;
+		case ROOK:   return 500;
+		case KING:   return 20000;
+		case QUEEN:  return 900;
+		default:	 return 0;
+	}
 }
 
-static int move_score(const Board &board, const Move &move) {
-  int score = 0;
-  int captured = board.squares[move.toRow][move.toCol];
-  if (move.isEnPassant)
-    captured = board.whiteToMove ? -PAWN : PAWN;
+static int move_score(const Board& board, const Move& move) {
+	int score = 0;
+	int captured = board.squares[move.toRow][move.toCol];
+	if (move.isEnPassant) captured = board.whiteToMove ? -PAWN : PAWN;
 
-  if (captured != 0) {
-    int movingValue =
-        piece_value(abs_piece(board.squares[move.fromRow][move.fromCol]));
-    score += 10000 + piece_value(abs_piece(captured)) * 16 - movingValue;
-  }
-  if (move.promotion != 0)
-    score += 8000 + piece_value(move.promotion);
-  if (move.isCastling)
-    score += 50;
-  return score;
+	if (captured != 0) {
+		const int moving = board.squares[move.fromRow][move.fromCol];
+		score += 10000 + piece_value(abs_piece(captured)) * 16 -
+				 piece_value(abs_piece(moving));
+	}
+	if (move.promotion != 0) score += 20000 + piece_value(move.promotion);
+	if (move.isCastling) score += 50;
+
+	return score;
 }
 
-static void order_moves(const Board &board, std::vector<Move> &moves,
-                        const Move *preferred) {
-  std::sort(moves.begin(), moves.end(), [&](const Move &a, const Move &b) {
-    int sa = move_score(board, a), sb = move_score(board, b);
-    if (preferred) {
-      if (a == *preferred)
-        sa += 1000000;
-      if (b == *preferred)
-        sb += 1000000;
-    }
-    return sa > sb;
-  });
+static void order_moves(const Board& board, std::vector<Move>& moves) {
+	std::sort(moves.begin(), moves.end(), [&](const Move& a, const Move& b) {
+		return move_score(board, a) > move_score(board, b);
+	});
 }
 
-static constexpr int kMaxPly = 128;
+static bool should_stop(SearchContext& ctx) {
+	if (ctx.stopped) return true;
 
-static int quiesce(Board &board, int alpha, int beta,
-                   std::vector<BoardState> &stateStack, int ply) {
-  if (board.halfMoveClock >= 100)
-    return 0;
+	if (++ctx.nodesSinceCheck < kTimeCheckInterval) return false;
 
-  const bool inCheck = is_in_check(board, board.whiteToMove);
+	ctx.nodesSinceCheck = 0;
+	if (std::chrono::steady_clock::now() >= ctx.deadline) {
+		ctx.stopped = true;
+	}
 
-  // Safety guard against very long forcing/check sequences.
-  if (ply >= kMaxPly) {
-    int e = evaluate(board);
-    return board.whiteToMove ? e : -e;
-  }
-
-  int best;
-
-  // Stand-pat is only legal when the side to move is NOT in check.
-  if (inCheck) {
-    best = -kInfinity;
-  } else {
-    int e = evaluate(board);
-    int standPat = board.whiteToMove ? e : -e;
-
-    if (standPat >= beta)
-      return standPat;
-
-    if (standPat > alpha)
-      alpha = standPat;
-
-    best = standPat;
-  }
-
-  std::vector<Move> moves;
-  moves.reserve(64);
-  generate_legal_moves(board, stateStack, moves);
-
-  if (moves.empty())
-    return inCheck ? (-kMateScore + ply) : 0;
-
-  order_moves(board, moves, nullptr);
-
-  for (const Move &move : moves) {
-    if (!inCheck) {
-      bool isCapture =
-          board.squares[move.toRow][move.toCol] != 0 || move.isEnPassant;
-
-      // In quiet positions, quiescence only searches captures,
-      // en passant, and promotions.
-      if (!isCapture && move.promotion == 0)
-        continue;
-    }
-
-    make_move(board, move, stateStack);
-    int score = -quiesce(board, -beta, -alpha, stateStack, ply + 1);
-    undo_move(board, move, stateStack);
-
-    if (score > best)
-      best = score;
-    if (score > alpha)
-      alpha = score;
-    if (alpha >= beta)
-      break;
-  }
-  return best;
+	return ctx.stopped;
 }
 
-static int negamax(Board &board, int depth, int alpha, int beta,
-                   std::vector<BoardState> &stateStack, int ply) {
-  if (board.halfMoveClock >= 100)
-    return 0;
+static int side_to_move_score(const Board& board) {
+	const int score = evaluate(board);
+	return board.whiteToMove ? score : -score;
+}
 
-  int origAlpha = alpha, origBeta = beta;
+static bool is_capture_or_promotion(const Board& board, const Move& move) {
+	return move.promotion != 0 || move.isEnPassant ||
+		   board.squares[move.toRow][move.toCol] != 0;
+}
 
-  TTEntry *ttEntry = probe_tt(board.hash);
-  Move ttMove{0, 0, 0, 0, 0, false, false};
-  if (ttEntry) {
-    ttMove = ttEntry->bestMove;
-    if (ttEntry->depth >= depth) {
-      int s = score_from_tt(ttEntry->score, ply);
-      switch (ttEntry->flag) {
-      case TTFlag::Exact:
-        return s;
-      case TTFlag::LowerBound:
-        if (s >= beta)
-          return s;
-        alpha = std::max(alpha, s);
-        break;
-      case TTFlag::UpperBound:
-        if (s <= alpha)
-          return s;
-        beta = std::min(beta, s);
-        break;
-      }
-    }
-  }
+static int quiesce(Board& board, int alpha, int beta,
+				   std::vector<BoardState>& stateStack, int ply,
+				   SearchContext& ctx,
+				   std::vector<std::vector<Move>>& moveLists) {
+	if (should_stop(ctx)) return 0;
+	if (board.halfMoveClock >= 100) return 0;
+	if (ply >= static_cast<int>(moveLists.size())) return side_to_move_score(board);
 
-  if (depth == 0)
-    return quiesce(board, alpha, beta, stateStack, ply);
+	const bool inCheck = is_in_check(board, board.whiteToMove);
+	int best = -kInfinity;
 
-  std::vector<Move> moves;
-  moves.reserve(64);
-  generate_legal_moves(board, stateStack, moves);
+	if (!inCheck) {
+		best = side_to_move_score(board);
+		if (best >= beta) return best;
+		if (best > alpha) alpha = best;
+	}
 
-  if (moves.empty())
-    return is_in_check(board, board.whiteToMove) ? (-kMateScore + ply) : 0;
+	std::vector<Move>& moves = moveLists[ply];
+	generate_legal_moves(board, stateStack, moves);
 
-  order_moves(board, moves, ttEntry ? &ttMove : nullptr);
+	if (moves.empty()) {
+		return inCheck ? (-kMateScore + ply) : 0;
+	}
 
-  int best = -kInfinity;
-  Move bestMove = moves.front();
+	order_moves(board, moves);
 
-  for (const Move &move : moves) {
-    make_move(board, move, stateStack);
-    int score = -negamax(board, depth - 1, -beta, -alpha, stateStack, ply + 1);
-    undo_move(board, move, stateStack);
+	for (const Move& move : moves) {
+		if (!inCheck && !is_capture_or_promotion(board, move)) continue;
 
-    if (score > best) {
-      best = score;
-      bestMove = move;
-    }
-    if (score > alpha)
-      alpha = score;
-    if (alpha >= beta)
-      break;
-  }
+		make_move(board, move, stateStack);
+		const int score = -quiesce(board, -beta, -alpha, stateStack,
+								   ply + 1, ctx, moveLists);
+		undo_move(board, move, stateStack);
 
-  TTFlag flag = TTFlag::Exact;
-  if (best <= origAlpha)
-    flag = TTFlag::UpperBound;
-  else if (best >= origBeta)
-    flag = TTFlag::LowerBound;
+		if (ctx.stopped) break;
 
-  store_tt(board.hash, depth, score_to_tt(best, ply), flag, bestMove);
-  return best;
+		if (score > best) best = score;
+		if (score > alpha) alpha = score;
+		if (alpha >= beta) break;
+	}
+
+	return best;
+}
+
+static int negamax(Board& board, int depth, int alpha, int beta,
+				   std::vector<BoardState>& stateStack, int ply,
+				   SearchContext& ctx,
+				   std::vector<std::vector<Move>>& moveLists) {
+	if (should_stop(ctx)) return 0;
+	if (board.halfMoveClock >= 100) return 0;
+	if (depth == 0)
+		return quiesce(board, alpha, beta, stateStack, ply, ctx, moveLists);
+
+	std::vector<Move>& moves = moveLists[ply];
+	generate_legal_moves(board, stateStack, moves);
+
+	if (moves.empty()) {
+		return is_in_check(board, board.whiteToMove) ? (-kMateScore + ply) : 0;
+	}
+
+	order_moves(board, moves);
+
+	int best = -kInfinity;
+	for (const Move& move : moves) {
+		make_move(board, move, stateStack);
+		const int score = -negamax(board, depth - 1, -beta, -alpha, stateStack,
+								   ply + 1, ctx, moveLists);
+		undo_move(board, move, stateStack);
+
+		if (ctx.stopped) break;
+
+		if (score > best) best = score;
+		if (score > alpha) alpha = score;
+		if (alpha >= beta) break;
+	}
+
+	return best;
+}
+
+static bool is_null_move(const Move& move) {
+	return move.fromRow == 0 && move.fromCol == 0 &&
+		   move.toRow == 0 && move.toCol == 0 &&
+		   move.promotion == 0 && !move.isCastling && !move.isEnPassant;
+}
+
+static char promotion_char(int piece) {
+	switch (piece) {
+		case KNIGHT: return 'n';
+		case BISHOP: return 'b';
+		case ROOK:   return 'r';
+		default:	 return 'q';
+	}
 }
 
 } // namespace
 
-static char promotion_char(int p) {
-  switch (p) {
-  case KNIGHT:
-    return 'n';
-  case BISHOP:
-    return 'b';
-  case ROOK:
-    return 'r';
-  default:
-    return 'q';
-  }
+void move_to_uci(const Move& move, char out[6]) {
+	if (is_null_move(move)) {
+		out[0] = '0';
+		out[1] = '0';
+		out[2] = '0';
+		out[3] = '0';
+		out[4] = '\0';
+		return;
+	}
+
+	out[0] = 'a' + move.fromCol;
+	out[1] = '1' + move.fromRow;
+	out[2] = 'a' + move.toCol;
+	out[3] = '1' + move.toRow;
+
+	if (move.promotion != 0) {
+		out[4] = promotion_char(move.promotion);
+		out[5] = '\0';
+	} else {
+		out[4] = '\0';
+	}
 }
 
-void move_to_uci(const Move &move, char out[6]) {
-  if (move == Move{0, 0, 0, 0, 0, false, false}) {
-    out[0] = '0';
-    out[1] = '0';
-    out[2] = '0';
-    out[3] = '0';
-    out[4] = '\0';
-    return;
-  }
-  out[0] = 'a' + move.fromCol;
-  out[1] = '1' + move.fromRow;
-  out[2] = 'a' + move.toCol;
-  out[3] = '1' + move.toRow;
-  if (move.promotion != 0) {
-    out[4] = promotion_char(move.promotion);
-    out[5] = '\0';
-  } else
-    out[4] = '\0';
-}
+Move search_best_move(Board& board, int maxDepth, int timeMs,
+					  std::vector<BoardState>& stateStack) {
+	if (maxDepth < 1) maxDepth = 1;
 
-Move search_best_move(Board &board, int depth,
-                      std::vector<BoardState> &stateStack) {
-  std::vector<Move> moves;
-  moves.reserve(64);
-  generate_legal_moves(board, stateStack, moves);
-  if (moves.empty())
-    return {0, 0, 0, 0, 0, false, false};
+	std::vector<std::vector<Move>> moveLists(maxDepth + kMaxQuiescencePly + 2);
+	for (std::vector<Move>& list : moveLists) list.reserve(64);
 
-  Move bestMove = moves.front();
-  if (TTEntry *e = probe_tt(board.hash))
-    bestMove = e->bestMove;
+	std::vector<Move>& moves = moveLists[0];
+	generate_legal_moves(board, stateStack, moves);
+	if (moves.empty()) return {0, 0, 0, 0, 0, false, false};
 
-  for (int d = 1; d <= depth; ++d) {
-    order_moves(board, moves, &bestMove);
+	Move bestMove = moves.front();
+	SearchContext ctx(timeMs);
 
-    int alpha = -kInfinity, best = -kInfinity;
-    Move iterBest = moves.front();
+	for (int depth = 1; depth <= maxDepth; ++depth) {
+		if (should_stop(ctx)) break;
 
-    for (const Move &move : moves) {
-      make_move(board, move, stateStack);
-      int score = -negamax(board, d - 1, -kInfinity, -alpha, stateStack, 1);
-      undo_move(board, move, stateStack);
+		order_moves(board, moves);
 
-      if (score > best) {
-        best = score;
-        iterBest = move;
-      }
-      if (score > alpha)
-        alpha = score;
-    }
+		int alpha = -kInfinity;
+		int best = -kInfinity;
+		Move depthBest = moves.front();
 
-    store_tt(board.hash, d, score_to_tt(best, 0), TTFlag::Exact, iterBest);
-    bestMove = iterBest;
-  }
+		for (const Move& move : moves) {
+			make_move(board, move, stateStack);
+			const int score = -negamax(board, depth - 1, -kInfinity, -alpha,
+									   stateStack, 1, ctx, moveLists);
+			undo_move(board, move, stateStack);
 
-  return bestMove;
+			if (ctx.stopped) break;
+
+			if (score > best) {
+				best = score;
+				depthBest = move;
+			}
+			if (score > alpha) alpha = score;
+		}
+
+		if (ctx.stopped) break;
+		bestMove = depthBest;
+	}
+
+	return bestMove;
 }

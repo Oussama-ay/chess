@@ -1,5 +1,4 @@
 #include "chess/fen.h"
-#include "chess/zobrist.h"
 
 #include <cctype>
 #include <cstring>
@@ -26,23 +25,21 @@ void parse_fen(const char* fen, Board& out) {
     out.enPassantCol = -1;
 
     std::istringstream ss(fen);
-    std::string tok[6];
-    for (int i = 0; i < 6; ++i) ss >> tok[i];
+    std::string placement, side, castling, enPassant, halfMove;
+    ss >> placement >> side >> castling >> enPassant >> halfMove;
 
     int row = 7, col = 0;
-    for (char c : tok[0]) {
+    for (char c : placement) {
         if (c == '/') { --row; col = 0; }
         else if (std::isdigit(static_cast<unsigned char>(c))) col += c - '0';
         else { out.squares[row][col] = piece_from_char(c); ++col; }
     }
 
-    out.whiteToMove = (tok[1] == "w");
-    out.castlingRights[0] = tok[2].find('K') != std::string::npos;
-    out.castlingRights[1] = tok[2].find('Q') != std::string::npos;
-    out.castlingRights[2] = tok[2].find('k') != std::string::npos;
-    out.castlingRights[3] = tok[2].find('q') != std::string::npos;
-    out.enPassantCol = (tok[3] == "-") ? -1 : tok[3][0] - 'a';
-    out.halfMoveClock = std::stoi(tok[4]);
-    out.fullMoveNumber = std::stoi(tok[5]);
-    out.hash = compute_zobrist_hash(out);
+    out.whiteToMove = (side == "w");
+    out.castlingRights[0] = castling.find('K') != std::string::npos;
+    out.castlingRights[1] = castling.find('Q') != std::string::npos;
+    out.castlingRights[2] = castling.find('k') != std::string::npos;
+    out.castlingRights[3] = castling.find('q') != std::string::npos;
+    out.enPassantCol = (enPassant == "-") ? -1 : enPassant[0] - 'a';
+    out.halfMoveClock = std::stoi(halfMove);
 }
